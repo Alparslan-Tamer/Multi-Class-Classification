@@ -7,13 +7,94 @@ import time
 import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
-from korelasyon import korelasyon
-from korelasyon_code.match_pairs import match_pairs
-from korelasyon_code.models.matching import Matching
-from config_korelasyon import MODEL_CONF
 from yon_karar_edited import Decider
-from tensorflow import keras
-import tensorflow as tf
+
+def get_default_device():
+    """Pick GPU if available, else CPU"""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+def to_device(data, device):
+    """Move tensor(s) to chosen device"""
+    if isinstance(data, (list,tuple)):
+        return [to_device(x, device) for x in data]
+    return data.to(device, non_blocking=True)
+
+class DeviceDataLoader():
+    """Wrap a dataloader to move data to a device"""
+    def __init__(self, dl, device):
+        self.dl = dl
+        self.device = device
+    
+    def __iter__(self):
+        """Yield a batch of data after moving it to device"""
+        for b in self.dl:
+            yield to_device(b, self.device)
+    
+    def __len__(self):
+        """Number of batches"""
+        return len(self.dl)
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ImageClassificationBase(nn.Module):
+    """Calculate loss for a batch of traning data"""
+    def training_step(self, batch):
+        images, labels = batch
+        out = self(images)
+        loss = F.cross_entropy(out, labels)
+        return loss
+    
+    """Calculate loss & accuracy for a batch of validation data"""
+    def validation_step(self, batch):
+        images, labels = batch
+        out = self(images)
+        loss = F.cross_entropy(out, labels)
+        acc = accuracy(out, labels)
+        return {"val_loss":loss.detach(), "val_acc": acc}
+    
+    def validation_epoch_end(self, outputs):
+        batch_losses = [x['val_loss'] for x in outputs]
+        epoch_loss = torch.stack(batch_losses).mean()   # Combine losses
+        batch_accs = [x['val_acc'] for x in outputs]
+        epoch_acc = torch.stack(batch_accs).mean()      # Combine accuracies
+        return {'val_loss': epoch_loss.item(), 'val_acc': epoch_acc.item()}
+    
+    def epoch_end(self, epoch, result):
+        print("Epoch [{}], train_loss: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}".format(
+            epoch, result['train_loss'], result['val_loss'], result['val_acc']))
+        
+def accuracy(outputs, labels):
+    _, preds = torch.max(outputs, dim=1)
+    return torch.tensor(torch.sum(preds == labels).item() / len(preds))
+
+def conv_block(in_channels, out_channels, pool=False):
+    layers = [nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1), 
+              nn.BatchNorm2d(out_channels), 
+              nn.ReLU(inplace=True)]
+    if pool: layers.append(nn.MaxPool2d(2))
+    return nn.Sequential(*layers)
+
+class ResNet9(ImageClassificationBase):
+    def __init__(self, in_channels, num_classes):
+        super().__init__()
+        # Input: 128 x 3 x 64 x 64
+        self.sigmoid = nn.Sigmoid()
+        self.conv1 = conv_block(in_channels, 32)
+        self.conv2 = conv_block(32, 16, pool=True) # 1  
+        self.classifier = nn.Sequential(nn.AdaptiveMaxPool2d(1), # 1
+                                        nn.Flatten(), # 128 x 512
+                                        nn.Dropout(0.2),
+                                        nn.Linear(16, num_classes))
+        
+    def forward(self, xb):
+        out = self.conv1(xb)
+        out = self.conv2(out)
+        out = self.classifier(out)
+        return out
 
 def prediction(my_image, net, match = None):  # sourcery no-metrics
     classes = []
@@ -61,19 +142,21 @@ def prediction(my_image, net, match = None):  # sourcery no-metrics
                 crop_img = my_image[boxes[i][1]:boxes[i][1]+boxes[i][3], boxes[i][0]:boxes[i][0]+boxes[i][2]]
                 total_shape = crop_img.shape[0] * crop_img.shape[1]
                 if (crop_img.shape[0] > 50 and total_shape > 5000) | (crop_img.shape[1] > 50 and  total_shape > 5000):
-                    crop_img = cv2.resize(crop_img, (32, 32), interpolation = cv2.INTER_LINEAR)
-                    crop_img = cv2.cvtColor(crop_img, cv2.COLOR_RGB2GRAY)
+                    img = torch.from_numpy(crop_img).permute(2, 0, 1)
+                    img = img.unsqueeze(0)
+                    img = img.float()
                     start = time.time()
-                    pred = match_RL_model.predict(crop_img.reshape(1, 32, 32, 1))
-                    pred = np.argmax(pred, axis = 1)[0]
+                    pred = match(img.to("cuda"))
                     end = time.time()
+                    pred = torch.max(torch.abs(pred), dim=1)
+                    pred = int(pred.indices[0])
                     print(end - start) # yama işlemi için zaman bakma amaçlı print işlemi
                     if pred == 0:
                         class_ids[i] = 1
                     elif pred == 1:
-                        class_ids[i] = 4
-                    elif pred == 2:
                         class_ids[i] = 3
+                    elif pred == 2:
+                        class_ids[i] = 4
                     elif pred == 3:
                         class_ids[i] = 8
     
@@ -99,9 +182,9 @@ def prediction(my_image, net, match = None):  # sourcery no-metrics
 
 
 if __name__ == "__main__":
-    tf.config.set_visible_devices([], 'GPU') # GPU kullanma işi predictionda hoş olmadı benim pcde, araçta da saçmalarsa bu kodu açabilirsiniz.
     device = 'cuda' if torch.cuda.is_available() and not False else 'cpu'
-    match_RL_model = keras.models.load_model('SagSolModel.h5') # Sağ sol ayrımı için keras modelimizi yüklüyoruz.
+    match_RL_model = to_device(ResNet9(3, 4), device)
+    match_RL_model = torch.load('sagsolpytorch.h5') # Sağ sol ayrımı için keras modelimizi yüklüyoruz.
     cfg = "cfg/yolov4-custom.cfg"
     weights = "backup_yolov4/yolov4-custom_best.weights"
     net = cv2.dnn.readNetFromDarknet(cfg, weights)
