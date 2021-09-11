@@ -70,18 +70,19 @@ def conv_block(in_channels, out_channels, pool=False):
     if pool: layers.append(nn.MaxPool2d(2))
     return nn.Sequential(*layers)
 
-
 class LittleModel(ImageClassificationBase):
     def __init__(self, in_channels, num_classes):
         super().__init__()
-        self.conv1 = conv_block(in_channels, 32)
-        self.conv2 = conv_block(32, 16, pool=True) # 1  
+        self.conv1 = conv_block(in_channels, 128)
+        self.conv2 = conv_block(128, 64, pool=True) # 1  
+        self.conv3 = conv_block(64, 32, pool=True) # 1  
         self.classifier = nn.Sequential(nn.AdaptiveMaxPool2d(1),
                                         nn.Flatten(), # 128 x 512
-                                        nn.Linear(16, num_classes))
+                                        nn.Linear(32, num_classes))
         
     def forward(self, xb):
         out = self.conv1(xb)
         out = self.conv2(out)
+        out = self.conv3(out)
         out = self.classifier(out)
         return out

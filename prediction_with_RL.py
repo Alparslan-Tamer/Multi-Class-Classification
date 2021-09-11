@@ -9,8 +9,7 @@ from PIL import Image
 import numpy as np
 from utils import to_device, LittleModel
 
-
-def prediction(my_image, net, match = None):  # sourcery no-metrics
+def prediction(my_image, net, count, match = None):  # sourcery no-metrics
     classes = []
     with open("data/sign.names", "r") as f:
         classes = [line.strip() for line in f.readlines()]
@@ -56,26 +55,34 @@ def prediction(my_image, net, match = None):  # sourcery no-metrics
                 crop_img = my_image[boxes[i][1]:boxes[i][1]+boxes[i][3], boxes[i][0]:boxes[i][0]+boxes[i][2]]
                 total_shape = crop_img.shape[0] * crop_img.shape[1]
                 if (crop_img.shape[0] > 50 and total_shape > 5000) | (crop_img.shape[1] > 50 and  total_shape > 5000):
-                    img = cv2.resize(crop_img, (32, 32))
+                    img = cv2.resize(crop_img, (64, 64))
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    cv2.imwrite(f"deneme/{count}.jpg", img)
                     img = img / 255.0
                     img = torch.from_numpy(img).permute(2, 0, 1)
                     img = img.unsqueeze(0)
                     img = img.float()
                     start = time.time()
                     pred = match(img.to("cuda"))
+                    
+                    print("--")
                     end = time.time()
-                    pred = torch.max(pred, dim=1)
-                    pred = int(pred.indices[0])
-                    print(end - start) # yama işlemi için zaman bakma amaçlı print işlemi
+                    _, pred = torch.max(pred, dim=1)
+                    pred = pred[0].item()
+                    #pred = int(pred.indices[0])
+
                     if pred == 0:
                         class_ids[i] = 1
+                        print("Sağa Dön")
                     elif pred == 1:
                         class_ids[i] = 3
+                        print("Sağa Dönme")
                     elif pred == 2:
                         class_ids[i] = 4
+                        print("Sola Dön")
                     elif pred == 3:
                         class_ids[i] = 8
+                        print("Sola Dönme")
     
     ######################################################################
 
@@ -118,7 +125,7 @@ if __name__ == "__main__":
     #        break
 
 
-
+    count = 0
     my_images = [f for f in glob.glob("img_folder/*.png")]
     my_images.sort(key=lambda x: [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', x)])
     for image_file in my_images:
@@ -126,7 +133,7 @@ if __name__ == "__main__":
         if image is not None:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
             image = image[:, 1280:, :]
-            class_pred = prediction(image, net, match=match_RL_model) # sahnede tespit ettiği nesnelerin değerlerini dönüyor. match kısmını None bırakırsanız
-                                                                      # sağ sol gözetmeden prediction yapılır.
+            class_pred = prediction(image, net, count, match=match_RL_model) # sahnede tespit ettiği nesnelerin değerlerini dönüyor. match kısmını None bırakırsanız
+            count+=1                                                               # sağ sol gözetmeden prediction yapılır.
         if cv2.waitKey(1) == 27:
             break
