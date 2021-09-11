@@ -142,13 +142,16 @@ def prediction(my_image, net, match = None):  # sourcery no-metrics
                 crop_img = my_image[boxes[i][1]:boxes[i][1]+boxes[i][3], boxes[i][0]:boxes[i][0]+boxes[i][2]]
                 total_shape = crop_img.shape[0] * crop_img.shape[1]
                 if (crop_img.shape[0] > 50 and total_shape > 5000) | (crop_img.shape[1] > 50 and  total_shape > 5000):
-                    img = torch.from_numpy(crop_img).permute(2, 0, 1)
+                    img = cv2.resize(crop_img, (32, 32))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = img / 255.0
+                    img = torch.from_numpy(img).permute(2, 0, 1)
                     img = img.unsqueeze(0)
                     img = img.float()
                     start = time.time()
                     pred = match(img.to("cuda"))
                     end = time.time()
-                    pred = torch.max(torch.abs(pred), dim=1)
+                    pred = torch.max(pred, dim=1)
                     pred = int(pred.indices[0])
                     print(end - start) # yama işlemi için zaman bakma amaçlı print işlemi
                     if pred == 0:
