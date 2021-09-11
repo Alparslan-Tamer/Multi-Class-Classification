@@ -40,6 +40,9 @@ class DeviceDataLoader():
 import torch.nn as nn
 import torch.nn.functional as F
 
+import torch.nn as nn
+import torch.nn.functional as F
+
 class ImageClassificationBase(nn.Module):
     """Calculate loss for a batch of traning data"""
     def training_step(self, batch):
@@ -78,16 +81,14 @@ def conv_block(in_channels, out_channels, pool=False):
     if pool: layers.append(nn.MaxPool2d(2))
     return nn.Sequential(*layers)
 
-class ResNet9(ImageClassificationBase):
+
+class LittleModel(ImageClassificationBase):
     def __init__(self, in_channels, num_classes):
         super().__init__()
-        # Input: 128 x 3 x 64 x 64
-        self.sigmoid = nn.Sigmoid()
         self.conv1 = conv_block(in_channels, 32)
         self.conv2 = conv_block(32, 16, pool=True) # 1  
-        self.classifier = nn.Sequential(nn.AdaptiveMaxPool2d(1), # 1
+        self.classifier = nn.Sequential(nn.AdaptiveMaxPool2d(1),
                                         nn.Flatten(), # 128 x 512
-                                        nn.Dropout(0.2),
                                         nn.Linear(16, num_classes))
         
     def forward(self, xb):
@@ -186,7 +187,7 @@ def prediction(my_image, net, match = None):  # sourcery no-metrics
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() and not False else 'cpu'
-    match_RL_model = to_device(ResNet9(3, 4), device)
+    match_RL_model = to_device(LittleModel(3, 4), device)
     match_RL_model = torch.load('sagsolpytorch.h5') # Sağ sol ayrımı için keras modelimizi yüklüyoruz.
     cfg = "cfg/yolov4-custom.cfg"
     weights = "backup_yolov4/yolov4-custom_best.weights"
